@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.cache/
+data/
+models/
+results/
+outputs/
+*.safetensors
+*.log
+.env
+.env.*
+!.env.example
