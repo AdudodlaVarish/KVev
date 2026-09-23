@@ -1,5 +1,3 @@
-"""Compare fresh prefill, exact L2 reuse, and FP8 L2 reuse."""
-
 import argparse
 import json
 import re
@@ -18,6 +16,7 @@ METRICS = {
     "l2": "lmcache_mp_lookup_hit_l2_tokens_total",
     "submitted": "lmcache_mp_l2_store_submitted_objects_chunks_total",
     "completed": "lmcache_mp_l2_store_completed_objects_chunks_total",
+    "l1_bytes": "lmcache_mp_l1_memory_usage_bytes",
 }
 CASES = [
     {
