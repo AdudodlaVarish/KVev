@@ -1,6 +1,7 @@
 """LMCache MP connector that discards KV computed for salted requests."""
 
 from lmcache.integration.vllm.lmcache_mp_connector import LMCacheMPConnector
+from cache_policies import SALTS
 
 
 class JevLMCacheMPConnector(LMCacheMPConnector):
@@ -8,6 +9,6 @@ class JevLMCacheMPConnector(LMCacheMPConnector):
         metadata = super().build_connector_meta(scheduler_output)
         metadata.requests = [
             item for item in metadata.requests
-            if item.direction != "STORE" or not item.cache_salt
+            if item.direction != "STORE" or item.cache_salt in ("", *SALTS.values())
         ]
         return metadata
