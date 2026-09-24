@@ -61,7 +61,7 @@ def metric_total(url):
     return total
 
 
-def chat(endpoint, messages):
+def chat(endpoint, messages, cache_salt=None):
     payload = {
         "model": MODEL,
         "messages": messages,
@@ -70,6 +70,8 @@ def chat(endpoint, messages):
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if cache_salt is not None:
+        payload["cache_salt"] = cache_salt
     request = Request(
         endpoint.rstrip("/") + "/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),

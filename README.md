@@ -1,6 +1,6 @@
 # JevKV: two-turn KV cache experiments
 
-This project measures whether a second question can retrieve a shared document prefix from LMCache. It uses Meta Llama 3.2 1B Instruct on the local 8 GB GPU. The first two milestones establish L2 retrieval and FP8 compression. The benchmark below also measures TurboQuant. Jev's per-query reuse decision is still to come.
+This project measures whether a second question can retrieve a shared document prefix from LMCache. It uses Meta Llama 3.2 1B Instruct on the local 8 GB GPU. The first two milestones establish L2 retrieval and FP8 compression, the third benchmarks TurboQuant, and the fourth adds a rule-based request-time reuse decision.
 
 ## Environment
 
@@ -180,3 +180,37 @@ All 81 cached follow-ups retrieved from L2 after vLLM restarts, with zero L1 hit
 | TurboQuant 4-bit L2 | 26/27 | 1,094,123,520 (27% of raw) | 1.2812 s |
 
 TurboQuant's failed case was an 8K comparison: its answer mentioned the section 2 audit-results commitment but missed the section 8 commitment to withhold employee identities. FP8 answers differed in wording from raw for 4 of 27 cases; TurboQuant differed for 11. The fact checks use required phrases, so they are useful for these known facts but do not grade every nuance of an answer. These timings are observations on one WSL laptop with engine-driven transfer and three examples per length/question cell. They show no overall first-token speed benefit from L2 reuse in this setup; TurboQuant's codec cost was substantial.
+
+## Milestone 4: first Jev request-time router
+
+`scripts/jev_router.py` uses the same 27 saved documents and token IDs from `results/benchmark.json`. Its rule reads the question text: a simple lookup naming one section uses FP8 L2; exact-wording questions, comparisons, multiple-section questions, and unknown forms get fresh prefill. The rule does not read benchmark question labels. This is a conservative integration baseline, not a trained quality predictor.
+
+The fresh route sends the **same prompt** with a new `cache_salt`. vLLM and LMCache include that salt in cache keys, so the seeded unsalted prefix cannot hit. The small `scripts/jev_connector.py` extension also removes store operations for salted requests. Their KV is computed for the current request and is not written to LMCache. The script first checks this with a salted request against a seeded prompt, then refuses any routed run where FP8 fails to retrieve solely from L2 or fresh retrieves, submits a store, or increases L2 data bytes.
+
+Run `python scripts/jev_router.py self-test` and keep `results/benchmark.json` from Milestone 3. Start a **new LMCache server** with an empty directory and the same FP8 settings:
+
+~~~bash
+mkdir -p results/router_l2/fp8
+lmcache server --host localhost --port 5555 --l1-size-gb 2 \
+  --eviction-policy noop --chunk-size 256 \
+  --supported-transfer-mode engine_driven --l2-store-policy skip_l1 \
+  --l2-adapter '{"type":"fs","base_path":"/home/varish/jevkv/results/router_l2/fp8","serde":{"type":"fp8","fp8_dtype":"float8_e4m3fn"}}'
+~~~
+
+Start vLLM with the project connector, both while seeding and after the restart:
+
+~~~bash
+PYTHONPATH=/home/varish/jevkv/scripts VLLM_USE_FLASHINFER_SAMPLER=0 \
+  vllm serve meta-llama/Llama-3.2-1B-Instruct \
+  --host 127.0.0.1 --port 8000 --max-model-len 9216 \
+  --gpu-memory-utilization 0.75 \
+  --kv-transfer-config '{"kv_connector":"JevLMCacheMPConnector","kv_connector_module_path":"jev_connector","kv_role":"kv_both","kv_connector_extra_config":{"lmcache.mp.host":"localhost","lmcache.mp.port":5555,"lmcache.mp.mp_transfer_mode":"engine_driven"}}'
+~~~
+
+Run `python scripts/jev_router.py seed`. Restart **only vLLM** with the same command, leaving LMCache running. Run `python scripts/jev_router.py run` followed by `python scripts/jev_router.py report`. The ignored `results/jev_router.json` saves each decision, reason, answer, prompt length, fact check, retrieval counters, store counter, and first-token time; `results/jev_router_summary.json` contains the comparison. To repeat the experiment, stop both servers and clear only the generated router state files and `results/router_l2/fp8` directory before starting again.
+
+### Local result (2026-09-23)
+
+The salt preflight retrieved zero L2 tokens, submitted zero stores, and added zero L2 data bytes. The router chose FP8 for 9 questions and fresh prefill for 18. Every FP8 request retrieved 1,792, 3,840, or 7,936 tokens from L2. Every fresh request retrieved zero, submitted zero stores, and added zero L2 data bytes. L1 hits were zero throughout, and all **27/27** answers passed the fixed fact checks. The routed median time to first token was **0.4484 s**; the earlier always-fresh and always-FP8 medians were **0.4459 s** and **0.5186 s**. These are exploratory comparisons because server configurations and run order differed. This run proves routing, not a latency or accuracy gain.
+
+The FP8 seed snapshot used **2,000,683,008 bytes** of L2 data. After the restart and query run, the directory held **2,038,431,744 bytes**. Unsalted FP8 follow-up requests submitted seven stores; two further chunks were written outside those measured request intervals. No salted fresh request submitted a store or added L2 data. The original compressed prefixes remain available for later reuse.

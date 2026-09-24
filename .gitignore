@@ -13,3 +13,5 @@ outputs/
 .env
 .env.*
 !.env.example
+README.md
+
