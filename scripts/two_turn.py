@@ -61,12 +61,12 @@ def metric_total(url):
     return total
 
 
-def chat(endpoint, messages, cache_salt=None):
+def chat(endpoint, messages, cache_salt=None, headers=None, max_tokens=160):
     payload = {
         "model": MODEL,
         "messages": messages,
         "temperature": 0,
-        "max_tokens": 160,
+        "max_tokens": max_tokens,
         "stream": True,
         "stream_options": {"include_usage": True},
     }
@@ -75,7 +75,7 @@ def chat(endpoint, messages, cache_salt=None):
     request = Request(
         endpoint.rstrip("/") + "/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **(headers or {})},
     )
     started = time.perf_counter()
     parts = []
